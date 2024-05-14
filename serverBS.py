@@ -127,13 +127,6 @@ class FedBS(Server):
                 client.send_time_cost['total_cost'] += 2 * (time.time() - start_time)
     
     def div(self, substract, sigma_data):
-        for subsss, sigmasss in zip(substract, sigma_data):
-            for subss, sigmass in zip(subsss, sigmasss):
-                for subs, sigmas in zip(subss, sigmass):
-                    for sub, sigma in zip(subs, sigmas):
-                        print(sub, sigma)
-                        if sigma != 0:
-                            sub /= sigma
-                        else :
-                            sub = 0
+        substract /= sigma_data
+        substract[torch.isnan(substract)] = 0.0
         return substract
