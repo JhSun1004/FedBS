@@ -48,7 +48,7 @@ class FedBS(Server):
         for i in range(self.global_rounds+1):
             s_t = time.time()
             self.selected_clients = self.select_clients()
-            self.send_models_ME()
+            self.send_models_BS()
 
             if i%self.eval_gap == 0:
                 print(f"\n-------------Round number: {i}-------------")
@@ -94,7 +94,7 @@ class FedBS(Server):
 
     def generate_sigma(self):
         assert (len(self.uploaded_models) > 0)
-        # ¼ÆËãÉÏ´«²ÎÊýµÄ±ê×¼²î
+        # Â¼Ã†Ã‹Ã£Ã‰ÃÂ´Â«Â²ÃŽÃŠÃ½ÂµÃ„Â±ÃªÃ—Â¼Â²Ã®
         if self.model_sigma == None:
             return
         for param in self.model_sigma.parameters():
@@ -110,7 +110,7 @@ class FedBS(Server):
             for bias, local_param, global_param, sigma in zip(self.local_bias[id].parameters(), uploaded_model.parameters(), self.global_model.parameters(), self.model_sigma.parameters()):
                 bias.data += self.sigma_lr*self.div(local_param.data-global_param.data, sigma.data)
 
-    def send_models_ME(self):
+    def send_models_BS(self):
         assert (len(self.clients) > 0)
         if self.model_sigma == None:
             self.model_sigma = copy.deepcopy(self.global_model)
