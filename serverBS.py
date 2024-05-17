@@ -108,7 +108,6 @@ class FedBS(Server):
     def update_bias(self):
         for uploaded_model, id in zip(self.uploaded_models, self.uploaded_ids):
             for bias, local_param, global_param, sigma in zip(self.local_bias[id].parameters(), uploaded_model.parameters(), self.global_model.parameters(), self.model_sigma.parameters()):
-                # sigma.data = torch.round(sigma.data, decimals=8) 
                 # with open("debug", 'a+') as f:
                 #     f.write(f"{sigma.data}")
                 bias.data += self.sigma_lr*self.div(local_param.data-global_param.data, sigma.data)
