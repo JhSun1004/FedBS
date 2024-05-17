@@ -42,7 +42,7 @@ class FedBS(Server):
             for param in local_bias.parameters():
                 param.data.zero_()
             self.local_bias.append(local_bias)
-        self.sigma_lr = 0.05     # 0.1, 0.05, 0.01
+        self.sigma_lr = 0.1     # 0.1, 0.05, 0.01
 
     def train(self):
         for i in range(self.global_rounds+1):
@@ -108,11 +108,11 @@ class FedBS(Server):
     def update_bias(self):
         for uploaded_model, id in zip(self.uploaded_models, self.uploaded_ids):
             for bias, local_param, global_param, sigma in zip(self.local_bias[id].parameters(), uploaded_model.parameters(), self.global_model.parameters(), self.model_sigma.parameters()):
-                # with open("debug", 'a+') as f:
-                #     f.write(f"{sigma.data}")
+                with open("debug_sigma", 'a+') as f:
+                    f.write(f"{sigma.data}")
                 bias.data += self.sigma_lr*self.div(local_param.data-global_param.data, sigma.data)
-            # with open("debug", 'a+') as f:
-            #     f.write(f"{bias.data}")
+            with open("debug_bias", 'a+') as f:
+                f.write(f"{bias.data}")
 
     def send_models_BS(self):
         assert (len(self.clients) > 0)
@@ -133,4 +133,5 @@ class FedBS(Server):
     def div(self, substract, sigma_data):
         substract /= sigma_data
         substract[torch.isnan(substract)] = 0.0
+        # substract[torch.gt(substract, 1e3)] = 0.0
         return substract
