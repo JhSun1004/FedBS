@@ -104,7 +104,7 @@ class FedBS(Server):
                 sigma.data += pow((client_param.data - global_param.data), 2)*w
         for sigma in self.model_sigma.parameters():
             sigma.data = torch.sqrt(sigma.data)
-            sigma.data = sigma.data if sigma.data >= 1e-6 else 0
+            sigma.data = torch.round(sigma.data, decimals=8) 
 
     def update_bias(self):
         for uploaded_model, id in zip(self.uploaded_models, self.uploaded_ids):
