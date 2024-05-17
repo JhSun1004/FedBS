@@ -42,7 +42,7 @@ class FedBS(Server):
             for param in local_bias.parameters():
                 param.data.zero_()
             self.local_bias.append(local_bias)
-        self.sigma_lr =0.1
+        self.sigma_lr = 0.1     # 0.1, 0.05, 0.01
 
     def train(self):
         for i in range(self.global_rounds+1):
@@ -104,6 +104,7 @@ class FedBS(Server):
                 sigma.data += pow((client_param.data - global_param.data), 2)*w
         for sigma in self.model_sigma.parameters():
             sigma.data = torch.sqrt(sigma.data)
+            sigma.data = sigma.data if sigma.data >= 1e-6 else 0
 
     def update_bias(self):
         for uploaded_model, id in zip(self.uploaded_models, self.uploaded_ids):
