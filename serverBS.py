@@ -16,20 +16,19 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 import time
-from flcore.clients.clientavg import clientAVG
+from flcore.clients.clientBS import clientBS
 from flcore.servers.serverbase import Server
 from threading import Thread
 import copy
 import torch
-import numpy as np
-
+import random
 class FedBS(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
         # select slow clients
         self.set_slow_clients()
-        self.set_clients(clientAVG)
+        self.set_clients(clientBS)
 
         print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
         print("Finished creating server and clients.")
@@ -38,14 +37,16 @@ class FedBS(Server):
         self.Budget = []
         self.model_sigma = None
         self.local_bias = []
+        self.uploaded_gradients = []
         for _ in range(self.num_clients):
             local_bias = copy.deepcopy(self.global_model)
             for param in local_bias.parameters():
                 param.data.zero_()
             self.local_bias.append(local_bias)
-        self.sigma_lr = 0.05    # 0.1, 0.05, 0.01
+        self.sigma_lr =0.01
 
     def train(self):
+        sigma_lr = self.sigma_lr
         for i in range(self.global_rounds+1):
             s_t = time.time()
             self.selected_clients = self.select_clients()
@@ -69,7 +70,8 @@ class FedBS(Server):
                 self.call_dlg(i)
             self.aggregate_parameters()
             self.generate_sigma()
-            self.update_bias(i)
+            sigma_lr = self.sigma_lr/(i//20+1)
+            self.update_bias(sigma_lr)
             self.Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.Budget[-1])
 
@@ -95,7 +97,7 @@ class FedBS(Server):
 
     def generate_sigma(self):
         assert (len(self.uploaded_models) > 0)
-        # Calculate sd of uploaded parameters
+        # 计算上传参数的标准差
         if self.model_sigma == None:
             return
         for param in self.model_sigma.parameters():
@@ -106,14 +108,20 @@ class FedBS(Server):
         for sigma in self.model_sigma.parameters():
             sigma.data = torch.sqrt(sigma.data)
 
-    def update_bias(self, i):
+    # def update_bias(self):
+    #     for uploaded_gradient, id in zip(self.uploaded_gradients, self.uploaded_ids):
+    #         for bias, grad, sigma in zip(self.local_bias[id].parameters(), uploaded_gradient, self.model_sigma.parameters()):
+    #             bias.data -= grad * sigma.data
+
+    def update_bias(self, sigma_lr):
         for uploaded_model, id in zip(self.uploaded_models, self.uploaded_ids):
             for bias, local_param, global_param, sigma in zip(self.local_bias[id].parameters(), uploaded_model.parameters(), self.global_model.parameters(), self.model_sigma.parameters()):
-                with open("debug_sigma", 'a+') as f:
-                    f.write(f"{sigma.data}")
-                bias.data += self.sigma_lr*np.power(np.e, -0.02*i)*self.div(local_param.data-global_param.data, sigma.data)
-            with open("debug_bias", 'a+') as f:
-                f.write(f"{bias.data}")
+                bias.data += sigma_lr*self.div(local_param.data-global_param.data, sigma.data)
+
+    # def update_bias(self):
+    #     for uploaded_model, id in zip(self.uploaded_models, self.uploaded_ids):
+    #         for bias, local_param, global_param, sigma in zip(self.local_bias[id].parameters(), uploaded_model.parameters(), self.global_model.parameters(), self.model_sigma.parameters()):
+    #             bias.data += (local_param.data-global_param.data) * sigma.data
 
     def send_models_BS(self):
         assert (len(self.clients) > 0)
@@ -130,6 +138,32 @@ class FedBS(Server):
 
                 client.send_time_cost['num_rounds'] += 1
                 client.send_time_cost['total_cost'] += 2 * (time.time() - start_time)
+
+    def receive_models_BS(self):
+        assert (len(self.selected_clients) > 0)
+
+        active_clients = random.sample(
+            self.selected_clients, int((1-self.client_drop_rate) * self.current_num_join_clients))
+
+        self.uploaded_ids = []
+        self.uploaded_weights = []
+        self.uploaded_models = []
+        self.uploaded_gradients = []
+        tot_samples = 0
+        for client in active_clients:
+            try:
+                client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
+                        client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
+            except ZeroDivisionError:
+                client_time_cost = 0
+            if client_time_cost <= self.time_threthold:
+                tot_samples += client.train_samples
+                self.uploaded_ids.append(client.id)
+                self.uploaded_weights.append(client.train_samples)
+                self.uploaded_models.append(client.model)
+                self.uploaded_gradients.append(client.gradient)
+        for i, w in enumerate(self.uploaded_weights):
+            self.uploaded_weights[i] = w / tot_samples
     
     def div(self, substract, sigma_data):
         substract /= sigma_data
