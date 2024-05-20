@@ -94,7 +94,7 @@ class FedBS(Server):
 
     def generate_sigma(self):
         assert (len(self.uploaded_models) > 0)
-        # 计算上传参数的标准差
+        # Calculate sd of uploaded parameters
         if self.model_sigma == None:
             return
         for param in self.model_sigma.parameters():
@@ -108,7 +108,7 @@ class FedBS(Server):
     def update_bias(self):
         for uploaded_model, id in zip(self.uploaded_models, self.uploaded_ids):
             for bias, local_param, global_param, sigma in zip(self.local_bias[id].parameters(), uploaded_model.parameters(), self.global_model.parameters(), self.model_sigma.parameters()):
-                bias.data -= local_param.grad * sigma.data
+                bias.data -= local_param.grad * sigma.data * self.sigma_lr
 
     def send_models_ME(self):
         assert (len(self.clients) > 0)

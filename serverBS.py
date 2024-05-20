@@ -21,6 +21,7 @@ from flcore.servers.serverbase import Server
 from threading import Thread
 import copy
 import torch
+import numpy as np
 
 class FedBS(Server):
     def __init__(self, args, times):
@@ -42,7 +43,7 @@ class FedBS(Server):
             for param in local_bias.parameters():
                 param.data.zero_()
             self.local_bias.append(local_bias)
-        self.sigma_lr = 0.1     # 0.1, 0.05, 0.01
+        self.sigma_lr = 0.05    # 0.1, 0.05, 0.01
 
     def train(self):
         for i in range(self.global_rounds+1):
@@ -68,7 +69,7 @@ class FedBS(Server):
                 self.call_dlg(i)
             self.aggregate_parameters()
             self.generate_sigma()
-            self.update_bias()
+            self.update_bias(i)
             self.Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.Budget[-1])
 
@@ -94,7 +95,7 @@ class FedBS(Server):
 
     def generate_sigma(self):
         assert (len(self.uploaded_models) > 0)
-        # ¼ÆËãÉÏ´«²ÎÊýµÄ±ê×¼²î
+        # Calculate sd of uploaded parameters
         if self.model_sigma == None:
             return
         for param in self.model_sigma.parameters():
@@ -105,12 +106,12 @@ class FedBS(Server):
         for sigma in self.model_sigma.parameters():
             sigma.data = torch.sqrt(sigma.data)
 
-    def update_bias(self):
+    def update_bias(self, i):
         for uploaded_model, id in zip(self.uploaded_models, self.uploaded_ids):
             for bias, local_param, global_param, sigma in zip(self.local_bias[id].parameters(), uploaded_model.parameters(), self.global_model.parameters(), self.model_sigma.parameters()):
                 with open("debug_sigma", 'a+') as f:
                     f.write(f"{sigma.data}")
-                bias.data += self.sigma_lr*self.div(local_param.data-global_param.data, sigma.data)
+                bias.data += self.sigma_lr*np.power(np.e, -0.02*i)*self.div(local_param.data-global_param.data, sigma.data)
             with open("debug_bias", 'a+') as f:
                 f.write(f"{bias.data}")
 
