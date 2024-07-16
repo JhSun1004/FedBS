@@ -66,9 +66,9 @@ class FedBS(Server):
             self.receive_models()
             if self.dlg_eval and i%self.dlg_gap == 0:
                 self.call_dlg(i)
-            self.generate_sigma()
             self.update_bias()
             self.aggregate_parameters()
+            self.generate_sigma()
             self.Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.Budget[-1])
 
@@ -107,11 +107,12 @@ class FedBS(Server):
 
     def update_bias(self):
         sigma_lr = 0.01
-        lmbd = 0.0
+        lmbd = 0.1
         for uploaded_model, id in zip(self.uploaded_models, self.uploaded_ids):
             for bias, local_param, global_param, sigma in zip(self.local_bias[id].parameters(), uploaded_model.parameters(), self.global_model.parameters(), self.model_sigma.parameters()):
                 bias.data = (1-sigma_lr-lmbd)*bias.data \
                             + sigma_lr*self.div(local_param.data-global_param.data, sigma.data)
+                # bias.data = (1-sigma_lr*sigma.data)*bias.data + sigma_lr*(local_param.data-global_param.data)
 
     def send_models_BS(self):
         assert (len(self.clients) > 0)
