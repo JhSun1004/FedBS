@@ -107,7 +107,7 @@ class FedBS(Server):
 
     def update_bias(self):
         sigma_lr = 0.01
-        lmbd = 0.1
+        lmbd = 0.0
         for uploaded_model, id in zip(self.uploaded_models, self.uploaded_ids):
             for bias, local_param, global_param, sigma in zip(self.local_bias[id].parameters(), uploaded_model.parameters(), self.global_model.parameters(), self.model_sigma.parameters()):
                 bias.data = (1-sigma_lr-lmbd)*bias.data \
@@ -160,4 +160,5 @@ class FedBS(Server):
         substract /= sigma_data
         substract[torch.isnan(substract)] = 0.0
         substract[torch.gt(substract, 10)] = 0.0
+        substract[torch.lt(substract, -10)] = 0.0
         return substract
