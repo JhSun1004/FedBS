@@ -1,102 +1,116 @@
-
-
-# PFLlib: Personalized Federated Learning Algorithm Library
-# Copyright (C) 2021  Jianqing Zhang
-
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-
-import time
-from utils.BS import BS
-from flcore.clients.clientavg import clientAVG
-from flcore.clients.clientala import clientALA
-from flcore.servers.serverbase import Server
-from threading import Thread
-import copy
-import matplotlib.pyplot as plt
 import torch
-import numpy as np
+import copy
+import torch.nn as nn
+import copy
+class BS:
+    def __init__(self, global_model: torch.nn.Module, sigma_lr: float = 1, num_clients: int = 20, sigma_type: int = 2):
+        """
+        Initialize the Bias Correction module.
 
-class FedBS(Server):
-    def __init__(self, args, times):
-        super().__init__(args, times)
+        Args:
+            global_model: The global model.
+            sigma_lr: The learning rate for the sigma. Default: 1
 
-        # select slow clients
-        self.set_slow_clients()
-        self.set_clients(clientAVG)
+        Returns:
+            None.
+        """
+        self.sigma_lr = sigma_lr
+        self.sigma_type = sigma_type
+        self.global_model = copy.deepcopy(global_model)
+        self.model_sigma = None
+        self.bias_layer = [1, 6]
+        self.local_bias = []
+        local_bias = []
+        for i, param in enumerate(global_model.parameters()):
+            if i in self.bias_layer:
+                local_bias.append(copy.deepcopy(param))
+        for _ in range(num_clients):
+            self.local_bias.append(copy.deepcopy(local_bias))
+    
+    def generate_sigma_1(self, global_model: torch.nn.Module, uploaded_models: list, uploaded_weights: list):
+        """
+        Generate the sigma for the bias correction.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        assert(len(self.uploaded_models) > 0)
+        if self.model_sigma == None:
+            return
+        for sigma in self.model_sigma:
+            sigma.data.zero_()
+        params_g = list(self.global_model.parameters())
+        for w, client_model in zip(uploaded_weights, uploaded_models):
+            params_l = list(client_model.parameters())
+            for i, sigma in enumerate(self.model_sigma):
+                sigma.data += abs(params_l[self.bias_layer[i]].data - params_g[self.bias_layer[i]].data) * w
+
+    def generate_sigma_2(self, global_model: torch.nn.Module, uploaded_models: list, uploaded_weights: list):
+        """
+        Generate the sigma for the bias correction.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        assert(len(uploaded_models) > 0)
+        # Calculate sd of uploaded parameters
+        if self.model_sigma == None:
+            return
+        for sigma in self.model_sigma:
+            sigma.data.zero_()
+        params_g = list(global_model.parameters())
+        for w, client_model in zip(uploaded_weights, uploaded_models):
+            params_l = list(client_model.parameters())
+            for i, sigma in enumerate(self.model_sigma):
+                sigma.data += pow((params_l[self.bias_layer[i]].data - params_g[self.bias_layer[i]].data), 2) * w
+        for sigma in self.model_sigma:
+            sigma.data = torch.sqrt(sigma.data)
         
-        print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
-        print("Finished creating server and clients.")
+    def update_bias(self, uploaded_models: list, uploaded_ids: list):
+        params_g = list(self.global_model.parameters())
+        for uploaded_model, id in zip(uploaded_models, uploaded_ids):
+            params_l = list(uploaded_model.parameters())
+            for i, (bias, sigma) in enumerate(zip(self.local_bias[id], self.model_sigma)):
+                bias.data = self.sigma_lr * (params_l[self.bias_layer[i]].data - params_g[self.bias_layer[i]].data) + (1 - self.sigma_lr * sigma.data) * bias.data
 
-        # self.load_model()
-        self.Budget = []
-        self.BS = BS(self.global_model, sigma_lr=1, num_clients=self.num_clients, sigma_type=2)
+    def update(self, global_model: torch.nn.Module, uploaded_models: list, uploaded_weights: list, uploaded_ids: list):
+        if self.model_sigma == None:
+            # self.model_sigma = copy.deepcopy(self.global_model)
+            self.model_sigma = []
+            for i, param in enumerate(self.global_model.parameters()):
+                if i in self.bias_layer:
+                    self.model_sigma.append(copy.deepcopy(param))
+        if self.sigma_type == 1:
+            self.generate_sigma_1(global_model, uploaded_models, uploaded_weights)
+        else:
+            self.generate_sigma_2(global_model, uploaded_models, uploaded_weights)                       
+        self.update_bias(uploaded_models, uploaded_ids)
+        self.global_model = copy.deepcopy(global_model)
 
-    def train(self):
-        for i in range(self.global_rounds+1):
-            s_t = time.time()
-            self.selected_clients = self.select_clients()
-            self.send_models()
+    def distribute_model(self, client):
+        """
+        Distribute the model to the client.
 
-            if i%self.eval_gap == 0:
-                print(f"\n-------------Round number: {i}-------------")
-                print("\nEvaluate global model")
-                self.evaluate()
+        Args:
+            client: The client to distribute the model to.
+            local_model: The local model to distribute.
 
-            for client in self.selected_clients:
-                client.train()
+        Returns:
+            None.
+        """
+        if self.model_sigma == None:
+            client.set_parameters(self.global_model)
+        else:  
+            local_model = copy.deepcopy(self.global_model)
+            params = list(local_model.parameters())
+            for i, (bias, sigma) in enumerate(zip(self.local_bias[client.id], self.model_sigma)):
+                params[self.bias_layer[i]].data += bias.data * sigma.data
+            client.set_parameters(local_model)
 
-            # threads = [Thread(target=client.train)
-            #            for client in self.selected_clients]
-            # [t.start() for t in threads]
-            # [t.join() for t in threads]
 
-            self.receive_models()
-            if self.dlg_eval and i%self.dlg_gap == 0:
-                self.call_dlg(i)
-            self.aggregate_parameters()
-            self.BS.update(self.global_model, self.uploaded_models, self.uploaded_weights, self.uploaded_ids)
-            self.Budget.append(time.time() - s_t)
-            print('-'*25, 'time cost', '-'*25, self.Budget[-1])
-
-            if self.auto_break and self.check_done(acc_lss=[self.rs_test_acc], top_cnt=self.top_cnt):
-                break
-
-        print("\nBest accuracy.")
-        # self.print_(max(self.rs_test_acc), max(
-        #     self.rs_train_acc), min(self.rs_train_loss))
-        print(max(self.rs_test_acc))
-        print("\nAverage time cost per round.")
-        print(sum(self.Budget[1:])/len(self.Budget[1:]))
-
-        self.save_results()
-        self.save_global_model()
-
-        if self.num_new_clients > 0:
-            self.eval_new_clients = True
-            self.set_new_clients(clientAVG)
-            print(f"\n-------------Fine tuning round-------------")
-            print("\nEvaluate new clients")
-            self.evaluate()
-
-    def send_models(self):
-        assert (len(self.clients) > 0)
-
-        for client in self.clients:
-            start_time = time.time()
-
-            self.BS.distribute_model(client)
-
-            client.send_time_cost['num_rounds'] += 1
-            client.send_time_cost['total_cost'] += 2 * (time.time() - start_time)
